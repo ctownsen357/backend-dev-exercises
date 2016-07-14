@@ -1,0 +1,283 @@
+---
+title: "RTI backend-dev-exercises"
+author: "Chris Townsend"
+date: "July 8, 2016"
+output: html_document
+runtime: shiny
+resource_files:
+- flattendb.sql
+- flattendb-without-ids.sql
+- querydata.csv
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(ggplot2)
+require(DT)
+```
+
+
+## RTI backend-dev-exercises
+Working through the RTI backend-dev-exercises originally [available here](https://github.com/rtidatascience/backend-dev-exercises).This R Markdown is being used to document the process I went through so that my six month future self will be able to understand why I did what I did and possibly cringe at the implementation after giving it more thought.
+
+### Live Demo
+I have a live web based demo loaded to: [https://ctownsend.shinyapps.io/backend-dev-exercises/](https://ctownsend.shinyapps.io/backend-dev-exercises/)  
+
+This is hosted on the ShinyApps public infrastructure but one could easilly host something like this on internal servers and use NGINX to proxy the open source version of the R Shiny server and provide SSL and authentication functionality if desired, with NGINX.  Alternatively one Could perform a mix of Python and R as needed or do everything in one or the other.  The final implementation would really be driven by the comfort level of the developers and researchers with the various implementation methods and the need of the project.
+
+### DATA 
+The original background information about the data set is available at [the backend-dev-exercises repository](https://github.com/rtidatascience/backend-dev-exercises)
+
+The data being explored is from a SQLite database named `exercise01.sqlite`. It consists of a set of normalized relational tables. The primary table is a table named `records`, containing 48,842 US Census records along with lookup tables for all of id columns in the records table.
+
+### Denormalize the data
+The following bash script pipes the flattendb.sql SQL script to the  sqlite3 process exporting the following query to a CSV file named `querydata.csv` `flattendb.sql` consists of query that outer joins all of the lookup tables to the main data table named `records`; outer joins are used to make sure we don't drop any rows from the records table.
+
+#### Approach:
+The way I would approach this as a final solution would really depend on what the end goal was.  I don't like to reinvent the wheel if I can help it so I try to use the right tool for the task at hand.  Additionally, my experience has been that the built in C based sqlite export to CSV utility is VERY fast when processing large data sets so I use it when I can but I've also used direct manipulation of SQLite data with Python and the pandas library, as well as the Python CSV library within the context of building an application that needs to export data as CSV.
+
+##### Bash:
+This is how I would do it in an interactive session or perhaps even as a Python sub-process if I knew I needed to handle very large exports as fast as possible.  
+
+**Note:** All of the commands are in the flattendb.sql file. 
+```{bash}
+rm *.csv #removing any CSV files so there isn't an append
+sqlite3 exercise01.sqlite < flattendb.sql
+```
+
+##### Python and pandas
+Directly via Python it would look something like this with the pandas library.  **Note:** This uses the same query as the above example.  
+```{python}
+import sqlite3 as sqlite
+import pandas.io.sql as psql
+
+conn = None
+try: 
+    conn = sqlite.connect('exercise01.sqlite')
+    query = """select records.id, 
+        records.age, 
+        records.workclass_id, 
+        case when wc.name is null then '?' else wc.name end as workclass, 
+        records.education_level_id, 
+        case when el.name is null then '?' else el.name end as education_level, 
+        records.education_num, 
+        records.marital_status_id, 
+        case when ms.name is null then '?' else ms.name end as marital_status, 
+        records.occupation_id, 
+        case when occ.name is null then '?' else occ.name end as occupation, 
+        records.relationship_id, 
+        case when rel.name is null then '?' else rel.name end as relationship, 
+        records.race_id, 
+        case when races.name is null then '?' else races.name end as race, 
+        records.sex_id, 
+        case when s.name is null then '?' else s.name end as sex, 
+        records.capital_gain, 
+        records.capital_loss, 
+        records.hours_week, 
+        records.country_id, 
+        case when c.name is null then '?' else c.name end as country, 
+        records.over_50k 
+        from records  
+        left outer join workclasses as wc  
+            on wc.id = records.workclass_id 
+        left outer join education_levels as el 
+            on el.id = records.education_level_id 
+        left outer join marital_statuses as ms 
+            on ms.id = records.marital_status_id     
+        left outer join occupations as occ 
+            on occ.id = records.occupation_id 
+        left outer join relationships as rel 
+            on rel.id = records.relationship_id 
+        left outer join races 
+            on races.id = records.race_id 
+        left outer join sexes as s 
+            on s.id = records.sex_id 
+        left outer join countries as c  
+            on c.id = records.country_id """
+    
+    flatten_data = psql.read_sql(query, conn)
+    flatten_data.to_csv('pyquerydata.csv')
+except:
+    print("Yikes, this was embarrasing but we've run into trouble: ", sys.exc_info()[0])
+finally:
+    conn.close()
+```
+
+
+For the investigation I'm dropping out the IDs except for the record ID for now with the intent of reducing clutter:
+```{bash}
+sqlite3 exercise01.sqlite < flattendb-without-ids.sql
+```
+
+### Import the CSV and Generate Some Summary Statistics
+
+#### Approach:
+I'll be using R here for the initial investigation.  While not an R expert, it is a new domain specific tool for me and one I turn to when wanting to investigate data.  R, R markdown, and Shiny are some very compelling and useful tools!  
+
+```{r}
+field.names <- c('record_id','age', 'workclass', 'education_level', 'education_num', 
+                'marital_status', 'occupation', 'relationship', 'race', 'sex', 
+                'capital_gain', 'capital_loss', 'hours_week', 'country', 'over_50k')    
+
+data <- read.csv('querydata-without-ids.csv', header = F, sep = ',', col.names = field.names)
+data["over_50k"] <- as.factor(data$over_50k > 0) #making sure this is viewed as boolean rather than integer values per the docs
+
+dim(data)
+head(data)
+str(data)
+summary(data)
+```
+
+When I generated the CSV I used a left outer join to make sure I'd retrieve all the records from the data table and that leaves several columns with missing data, indicated by ?; as as noted in the initial description of the data.  I'd want to resolve these if possible and at the very least review some of those records in further detail.  
+
+
+#### Some initial plotting could be done with GGally:ggpairs to do some quick exploratory visualization:
+Ideally, I'd do a lot of this sort of investigation looking at more of the data and investigating relationships.
+
+```{r}
+require(ggplot2)
+require(GGally)
+pm <- ggpairs(data, mapping = aes(color = sex), columns=c( "hours_week", "marital_status", "over_50k"), lower = list(
+    continuous = "smooth",
+    combo = "facetdensity",
+    mapping = aes(color = sex)
+))
+pm
+
+pm[1,1]
+pm[1,2]
+pm[1,3]
+pm[3,1]
+pm[2,2]
+pm[3,3]
+```
+
+### K-means for some additional investigation
+On second thought it might have been better to leave the IDs in as I could have used them as numeric fields to cluster on for further investigation.  That said, something like this would provide a possible means of doing some additional exploratory analysis:
+```{r echo=FALSE}
+
+
+#from the rmdexamples library, modified to only show numeric columns in the selection lists
+kmeans_cluster <- function(dataset) { 
+  
+  require(shiny)  
+  numericOnlyDfNames <- names(dataset[sapply(dataset,is.numeric)])
+  
+  shinyApp(
+    ui = fluidPage(
+      fluidRow(style = "padding-bottom: 20px;",
+        column(4, selectInput('xcol', 'X Variable', numericOnlyDfNames)),
+        column(4, selectInput('ycol', 'Y Variable', numericOnlyDfNames,
+                              selected=names(dataset)[[2]])),
+        column(4, numericInput('clusters', 'Cluster count', 3,
+                               min = 1, max = 9))
+      ),
+      fluidRow(
+        plotOutput('kmeans', height = "400px")  
+      )
+    ),
+    
+    server = function(input, output, session) {
+      
+      # Combine the selected variables into a new data frame
+      selectedData <- reactive({
+        dataset[, c(input$xcol, input$ycol)]
+      })
+      
+      clusters <- reactive({
+        kmeans(selectedData(), input$clusters)
+      })
+      
+      output$kmeans <- renderPlot(height = 400, {
+        par(mar = c(5.1, 4.1, 0, 1))
+        plot(selectedData(),
+             col = clusters()$cluster,
+             pch = 20, cex = 3)
+        points(clusters()$centers, pch = 4, cex = 4, lwd = 4)
+      })
+    },
+    
+    options = list(height = 500)
+  )
+}
+
+kmeans_cluster(data)
+
+```
+
+### Does working more hours make a difference for your making over 50K per year?
+I'm going to use a shuffle method to see if there is a relationship between the number of hours worked and the liklihood that one makes over $50K per year. The boxplot of the data, to me, looks like there is a relationship:
+Let's look at this data as a boxplot:
+```{r}
+qplot(factor(over_50k), hours_week, data = data, geom = "boxplot")
+```
+
+Now, let's run the shuffling simulation and plot the distribution:
+```{r}
+makesOver50K <- data$hours_week[data$over_50k == TRUE]
+makesOver50K.mean <- mean(makesOver50K)
+
+makesUnder50K <- data$hours_week[data$over_50k == FALSE]
+makesUnder50K.mean <- mean(makesUnder50K)
+
+meandifferenceInHoursWorked <- makesOver50K.mean - makesUnder50K.mean
+
+meandifferenceInHoursWorked
+
+population <- data$hours_week
+makesUnder50KStartIndex <- 1
+makesUnder50KEndIndex <- length(makesUnder50K)
+makesOver50KStartIndex <- makesUnder50KEndIndex + 1
+makesOver50KEndIndex <- length(population)
+runs <- 10000 
+one.trial <- function(population){
+    shuffledPopulation <- sample(population)
+    sampleMakesUnder50KMean <- mean(shuffledPopulation[makesUnder50KStartIndex:makesUnder50KEndIndex])
+    sampleMakesOver50KMean <- mean(shuffledPopulation[makesOver50KStartIndex:makesOver50KEndIndex])
+    
+    sampleMakesOver50KMean - sampleMakesUnder50KMean
+}
+
+results <- replicate(runs, one.trial(population))
+
+length(results[results > meandifferenceInHoursWorked]) / runs
+
+```
+
+```{r echo=FALSE}
+#qplot(results, geom = "histogram")
+inputPanel(
+  selectInput("n_breaks", label = "Number of bins:",
+              choices = c(10, 20, 35, 50), selected = 20),
+
+    sliderInput("bw_adjust", label = "Bandwidth adjustment:",
+              min = 0.2, max = 2, value = 1, step = 0.2)
+)
+
+renderPlot({
+  hist(results, probability = TRUE, breaks = as.numeric(input$n_breaks),
+       ylab = "count", main = "distribution of shuffling simulation results")
+  
+  dens <- density(results, adjust = input$bw_adjust)
+  lines(dens, col = "blue")
+})
+
+ 
+```
+
+It looks like the number of hours worked makes a difference in being in the under or over 50K category.  The actual mean difference in hours worked is much greater than the shuffle models distribution meaning the difference in hours worked is significant to the makes over 50K category.  Given more time I'd want to think this through more and get someone to double check what I've done as this isn't my area of expertise but it IS an area I'm very interested in further study and I'm actively learning. 
+
+```{r}
+t.test(hours_week~over_50k, data = data, mu = meandifferenceInHoursWorked, alternative = "greater")
+```
+
+This t.test would appear to agree with the simulation that indicates we can reject the null hypothesis and would indicate that the number of hours worked is a strong indication of someone making over 50K per year.
+
+
+### Looking at the raw data:
+```{r echo=FALSE}
+DT::renderDataTable(data, server = TRUE)
+```
+
+
+
