@@ -18,7 +18,7 @@ require(DT)
 
 
 ## RTI backend-dev-exercises
-Working through the RTI backend-dev-exercises originally [available here](https://github.com/rtidatascience/backend-dev-exercises).This R Markdown is being used to document the process I went through so that my six month future self will be able to understand why I did what I did and possibly cringe at the implementation after giving it more thought.
+Working through the RTI backend-dev-exercises originally [available here](https://github.com/rtidatascience/backend-dev-exercises).This R Markdown is being used to document the process I went through so that my six month future self will be able to understand why I did what I did.
 
 ### Live Demo
 I have a live web based demo loaded to: [https://ctownsend.shinyapps.io/backend-dev-exercises/](https://ctownsend.shinyapps.io/backend-dev-exercises/)  
